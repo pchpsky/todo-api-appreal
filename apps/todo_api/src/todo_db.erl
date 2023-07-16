@@ -2,72 +2,73 @@
 
 -include("include/todo.hrl").
 
--behaviour(gen_server).
+-export([all/0, find/1, insert/1, update/2, delete/1, init/0]).
 
--export([start_link/0, init/1, handle_call/3, handle_cast/2]).
--export([all/0, get/1, create/1, update/2, delete/1]).
-
--spec all() -> [#persisted_todo{}].
 all() ->
-  gen_server:call(?MODULE, all).
+  mnesia:activity(transaction, fun() -> mnesia:match_object({todo, '_', '_', '_'}) end).
 
--spec get(integer()) -> {ok, #persisted_todo{}} | error.
-get(TodoID) ->
-  gen_server:call(?MODULE, {get, TodoID}).
+find(TodoID) ->
+  case mnesia:activity(transaction, fun() -> mnesia:read({todo, TodoID}) end) of
+    [Todo] ->
+      {ok, Todo};
+    [] ->
+      {error, not_found}
+  end.
 
--spec create(#todo{}) -> {ok, #persisted_todo{}} | error.
-create(Todo = #todo{}) ->
-  gen_server:call(?MODULE, {create, Todo}).
+insert(TodoProps = #todo_props{}) ->
+  Todo =
+    #todo{id = next_todo_id(),
+          title = TodoProps#todo_props.title,
+          completed = TodoProps#todo_props.completed},
+  case mnesia:transaction(fun() -> mnesia:write(Todo) end) of
+    {atomic, ok} ->
+      {ok, Todo};
+    {aborted, _} ->
+      error
+  end.
 
--spec update(integer(), #todo{}) -> {ok, #persisted_todo{}} | error.
-update(TodoID, Todo = #todo{}) ->
-  gen_server:call(?MODULE, {update, TodoID, Todo}).
+update(TodoID, Fun) ->
+  case find(TodoID) of
+    {ok, Todo} ->
+      TodoProps = todo_props(Fun(Todo)),
+      NewTodo =
+        Todo#todo{title = TodoProps#todo_props.title, completed = TodoProps#todo_props.completed},
+      case mnesia:transaction(fun() -> mnesia:write(NewTodo) end) of
+        {atomic, ok} ->
+          {ok, NewTodo};
+        {aborted, _} ->
+          {error, failed_to_update}
+      end;
+    {error, not_found} ->
+      {error, not_found}
+  end.
 
--spec delete(integer()) -> ok.
 delete(TodoID) ->
-  gen_server:call(?MODULE, {delete, TodoID}).
+  case find(TodoID) of
+    {ok, _} ->
+      case mnesia:transaction(fun() -> mnesia:delete({todo, TodoID}) end) of
+        {atomic, ok} ->
+          ok;
+        {aborted, Reason} ->
+          {error, Reason}
+      end;
+    {error, not_found} ->
+      {error, not_found}
+  end.
 
-start_link() ->
-  gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+init() ->
+  mnesia:create_schema([node()]),
+  mnesia:change_table_copy_type(schema, node(), disc_copies),
+  mnesia:start(),
+  mnesia:create_table(todo,
+                      [{attributes, record_info(fields, todo)}, {disc_copies, [node()]}]),
+  mnesia:create_table(todo_id, [{disc_copies, [node()]}]),
+  mnesia:wait_for_tables([todo, todo_id], 5000).
 
-init(_Args) ->
-  {ok, #{todos => maps:new(), next_todo_id => 1}}.
+todo_props(#todo_props{} = Todo) ->
+  Todo;
+todo_props(#todo{} = Todo) ->
+  #todo_props{title = Todo#todo.title, completed = Todo#todo.completed}.
 
-handle_call(all, _From, #{todos := Todos} = State) ->
-  {reply, maps:values(Todos), State};
-handle_call({get, TodoID}, _From, #{todos := Todos} = State) ->
-  {reply, maps:find(TodoID, Todos), State};
-handle_call({create, Todo}, _From, State) ->
-  #{next_todo_id := TodoID, todos := Todos} = State,
-  #todo{title = Title, completed = Completed} = Todo,
-  NewTodo =
-    #persisted_todo{title = Title,
-                    id = TodoID,
-                    completed = Completed},
-  State1 = State#{todos := maps:put(TodoID, NewTodo, Todos), next_todo_id := TodoID + 1},
-  {reply, {ok, NewTodo}, State1};
-handle_call({update, TodoID, Todo}, _From, #{todos := Todos} = State) ->
-  UpdateTodo = fun(PrevTodo) ->
-    PrevTodo#persisted_todo{title = Todo#todo.title,
-                            completed = Todo#todo.completed}
-  end,
-  Todos1 =
-    case maps:is_key(TodoID, Todos) of
-      true ->
-        maps:update_with(TodoID, UpdateTodo, Todos);
-      false ->
-        Todos
-    end,
-  {reply, maps:find(TodoID, Todos1), State#{todos := Todos1}};
-handle_call({delete, TodoID}, _From, #{todos := Todos} = State) ->
-  case maps:is_key(TodoID, Todos) of
-    true ->
-      {reply, ok, State#{todos := maps:remove(TodoID, Todos)}};
-    false ->
-      {reply, error, State}
-  end;
-handle_call(_Message, _From, State) ->
-  {reply, {error, unknown_message}, State}.
-
-handle_cast(_Request, State) ->
-  {noreply, State}.
+next_todo_id() ->
+  mnesia:dirty_update_counter(todo_id, 2, 1).

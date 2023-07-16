@@ -29,7 +29,6 @@ init([]) ->
     #{strategy => one_for_all,
       intensity => 5,
       period => 60},
-  TodoDb = #{id => todo_db, start => {todo_db, start_link, []}},
-  {ok, {SupFlags, [TodoDb]}}.
+  {ok, {SupFlags, []}}.
 
 %% internal functions

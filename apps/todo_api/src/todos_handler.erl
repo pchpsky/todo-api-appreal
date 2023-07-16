@@ -5,7 +5,7 @@
 -export([init/2, allowed_methods/2, content_types_provided/2, content_types_accepted/2,
          list_todos/2, show_todo/2, create_todo/2, update_todo/2, delete_resource/2]).
 
--import(helpers, [reply/3, get_route/1, read_json_body/1]).
+-import(helpers, [reply/3, get_route/1, read_json_body/1, const/1]).
 
 init(Req, Opts) ->
   {cowboy_rest, Req, Opts}.
@@ -44,11 +44,11 @@ list_todos(Req, State) ->
 
 show_todo(Req, State) ->
   TodoId = cowboy_req:binding(todo_id, Req),
-  case todo_db:get(TodoId) of
+  case todo_db:find(TodoId) of
     {ok, Todo} ->
       Resp = jsx:encode(todo_to_map(Todo)),
       {Resp, Req, State};
-    error ->
+    {error, not_found} ->
       {false, reply(404, #{message => <<"Not found">>}, Req), State}
   end.
 
@@ -56,7 +56,7 @@ create_todo(Req, State) ->
   Req2 =
     case read_json_body(Req) of
       {ok, TodoProps, Req1} ->
-        case todo_db:create(todo_from_map(TodoProps)) of
+        case todo_db:insert(todo_from_map(TodoProps)) of
           {ok, Todo} ->
             reply(200, todo_to_map(Todo), Req1)
         end;
@@ -70,10 +70,10 @@ update_todo(Req, State) ->
     case read_json_body(Req) of
       {ok, TodoProps, Req1} ->
         TodoId = cowboy_req:binding(todo_id, Req),
-        case todo_db:update(TodoId, todo_from_map(TodoProps)) of
+        case todo_db:update(TodoId, const(todo_from_map(TodoProps))) of
           {ok, Todo} ->
             reply(200, todo_to_map(Todo), Req1);
-          error ->
+          {error, not_found} ->
             reply(404, #{message => <<"Not found">>}, Req1)
         end;
       {error, Req1} ->
@@ -86,16 +86,17 @@ delete_resource(Req, State) ->
   case todo_db:delete(TodoId) of
     ok ->
       {true, Req, State};
-    error ->
+    {error, not_found} ->
       {false, reply(404, #{message => <<"Not found">>}, Req), State}
   end.
 
 todo_from_map(Map) ->
-  #{<<"title">> := Title, <<"completed">> := Completed} = Map,
-  #todo{title = Title, completed = Completed}.
+  #{<<"title">> := Title} = Map,
+  Completed = maps:get(<<"completed">>, Map, false),
+  #todo_props{title = Title, completed = Completed}.
 
-todo_to_map(Todo = #persisted_todo{}) ->
-  #persisted_todo{id = TodoID,
+todo_to_map(Todo = #todo{}) ->
+  #todo{id = TodoID,
                   title = Title,
                   completed = Completed} =
     Todo,

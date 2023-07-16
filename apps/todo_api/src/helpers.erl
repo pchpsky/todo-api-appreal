@@ -1,6 +1,6 @@
 -module(helpers).
 
--export([read_json_body/1, reply/3, get_route/1]).
+-export([read_json_body/1, reply/3, get_route/1, const/1]).
 
 read_json_body(Req) ->
   {ok, [{Body, true}], Req1} = cowboy_req:read_urlencoded_body(Req),
@@ -16,3 +16,6 @@ reply(Status, Body = #{}, Req) ->
 
 get_route(Req) ->
   {cowboy_req:method(Req), cowboy_req:path(Req)}.
+
+const(Val) ->
+  fun (_) -> Val end.

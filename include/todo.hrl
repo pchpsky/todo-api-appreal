@@ -1,9 +1,9 @@
--record(todo, {
+-record(todo_props, {
     title :: string(),
-    completed :: boolean()
+    completed = false :: boolean()
 }).
 
--record(persisted_todo, {
+-record(todo, {
     id :: integer(),
     title :: string(),
     completed :: boolean()
