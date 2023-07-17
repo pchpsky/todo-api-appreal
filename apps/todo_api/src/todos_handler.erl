@@ -6,7 +6,7 @@
          list_todos/2, show_todo/2, create_todo/2, update_todo/2, complete_todo/2,
          delete_resource/2]).
 
--import(helpers, [reply/3, get_route/1, read_json_body/1, const/1]).
+-import(helpers, [reply/3, get_route/1, parse_json_with_schema/2, const/1]).
 
 init(Req, Opts) ->
   {cowboy_rest, Req, Opts}.
@@ -33,7 +33,6 @@ content_types_provided(Req, State) ->
   end.
 
 content_types_accepted(Req, State) ->
-  logger:info("content_types_accepted Route: ~p", [get_route(Req)]),
   case get_route(Req) of
     {<<"POST">>, [<<"todos">>]} ->
       {[{{<<"application">>, <<"json">>, []}, create_todo}], Req, State};
@@ -61,30 +60,30 @@ show_todo(Req, State) ->
 
 create_todo(Req, State) ->
   Req2 =
-    case read_json_body(Req) of
+    case parse_todo(Req) of
       {ok, TodoProps, Req1} ->
-        case todo_db:insert(todo_from_map(TodoProps)) of
+        case todo_db:insert(TodoProps) of
           {ok, Todo} ->
             reply(200, todo_to_map(Todo), Req1)
         end;
-      {error, Req1} ->
-        Req1
+      {error, {Code, Response}, Req1} ->
+        reply(Code, Response, Req1)
     end,
   {stop, Req2, State}.
 
 update_todo(Req, State) ->
   Req2 =
-    case read_json_body(Req) of
+    case parse_todo(Req) of
       {ok, TodoProps, Req1} ->
         TodoId = cowboy_req:binding(todo_id, Req),
-        case todo_db:update(TodoId, const(todo_from_map(TodoProps))) of
+        case todo_db:update(TodoId, const(TodoProps)) of
           {ok, Todo} ->
             reply(200, todo_to_map(Todo), Req1);
           {error, not_found} ->
             reply(404, #{message => <<"Not found">>}, Req1)
         end;
-      {error, Req1} ->
-        Req1
+      {error, {Code, Response}, Req1} ->
+        reply(Code, Response, Req1)
     end,
   {stop, Req2, State}.
 
@@ -108,11 +107,6 @@ delete_resource(Req, State) ->
       {false, reply(404, #{message => <<"Not found">>}, Req), State}
   end.
 
-todo_from_map(Map) ->
-  #{<<"title">> := Title} = Map,
-  Completed = maps:get(<<"completed">>, Map, false),
-  #todo_props{title = Title, completed = Completed}.
-
 todo_to_map(Todo = #todo{}) ->
   #todo{id = TodoID,
         title = Title,
@@ -121,3 +115,20 @@ todo_to_map(Todo = #todo{}) ->
   #{<<"id">> => TodoID,
     <<"title">> => Title,
     <<"completed">> => Completed}.
+
+parse_todo(Req) ->
+  Schema =
+    #{<<"$schema">> => <<"http://json-schema.org/draft-06/schema#">>,
+      <<"type">> => <<"object">>,
+      <<"properties">> =>
+        #{<<"title">> => #{<<"type">> => <<"string">>},
+          <<"completed">> => #{<<"type">> => <<"boolean">>}},
+      <<"required">> => [<<"title">>]},
+  case parse_json_with_schema(Schema, Req) of
+    {ok, Props, Req1} ->
+      {ok,
+       #todo_props{title = maps:get(<<"title">>, Props),
+                   completed = maps:get(<<"completed">>, Props, false)}, Req1};
+    Error ->
+      Error
+  end.

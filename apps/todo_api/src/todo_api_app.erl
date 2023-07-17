@@ -9,7 +9,7 @@ start(_StartType, _StartArgs) ->
   Routes = [
     {"/todos/:todo_id/complete", [{todo_id, int}], todos_handler, []},
     {"/todos/:todo_id", [{todo_id, int}], todos_handler, []},
-    {"/todos", [{todo_id, int}], todos_handler, []},
+    {"/todos", todos_handler, []},
     {"/[...]", no_match_handler, []}
   ],
   Dispatch = cowboy_router:compile([{'_', Routes}]),

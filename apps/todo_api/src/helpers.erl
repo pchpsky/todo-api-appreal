@@ -1,15 +1,24 @@
 -module(helpers).
 
--export([read_json_body/1, reply/3, get_route/1, const/1]).
+-export([parse_json_with_schema/2, reply/3, get_route/1, const/1]).
 
-read_json_body(Req) ->
+parse_json_with_schema(Schema, Req) ->
   {ok, [{Body, true}], Req1} = cowboy_req:read_urlencoded_body(Req),
   case jsx:is_json(Body) of
     true ->
-      {ok, jsx:decode(Body), Req1};
+      case jesse:validate_with_schema(Schema, jsx:decode(Body)) of
+        {ok, Props} ->
+          {ok, Props, Req1};
+        {error, Reasons} ->
+          MakeError = fun (Reason) ->
+            maps:with([error, data, path], maps:from_list(jesse_error:reason_to_jsx(Reason)))
+          end,
+          Errors = lists:map(MakeError, Reasons),
+          {error, {422, #{message => <<"Unprocessable entity">>, errors => Errors}}, Req1}
+      end;
     false ->
-      {error, reply(400, #{error => "Bad request"}, Req)}
-  end.
+      {error, {400, #{message => <<"Bad request">>}}, Req1}
+    end.
 
 reply(Status, Body = #{}, Req) ->
   cowboy_req:reply(Status, #{<<"content-type">> => <<"application/json">>}, jsx:encode(Body), Req).
