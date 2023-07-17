@@ -3,7 +3,8 @@
 -include("include/todo.hrl").
 
 -export([init/2, allowed_methods/2, content_types_provided/2, content_types_accepted/2,
-         list_todos/2, show_todo/2, create_todo/2, update_todo/2, delete_resource/2]).
+         list_todos/2, show_todo/2, create_todo/2, update_todo/2, complete_todo/2,
+         delete_resource/2]).
 
 -import(helpers, [reply/3, get_route/1, read_json_body/1, const/1]).
 
@@ -11,28 +12,34 @@ init(Req, Opts) ->
   {cowboy_rest, Req, Opts}.
 
 allowed_methods(Req, State) ->
-  case cowboy_req:path(Req) of
-    <<"/todos">> ->
+  {_, Route} = get_route(Req),
+  case Route of
+    [<<"todos">>] ->
       {[<<"GET">>, <<"POST">>], Req, State};
-    <<"/todos/", _/binary>> ->
-      {[<<"GET">>, <<"PUT">>, <<"DELETE">>], Req, State}
+    [<<"todos">>, <<_/binary>>] ->
+      {[<<"GET">>, <<"PUT">>, <<"DELETE">>], Req, State};
+    [<<"todos">>, <<_/binary>>, <<"complete">>] ->
+      {[<<"POST">>], Req, State}
   end.
 
 content_types_provided(Req, State) ->
   case get_route(Req) of
-    {<<"GET">>, <<"/todos">>} ->
+    {<<"GET">>, [<<"todos">>]} ->
       {[{{<<"application">>, <<"json">>, []}, list_todos}], Req, State};
-    {<<"GET">>, <<"/todos/", _/binary>>} ->
+    {<<"GET">>, [<<"todos">>, <<_/binary>>]} ->
       {[{{<<"application">>, <<"json">>, []}, show_todo}], Req, State};
     _ ->
       {[{{<<"application">>, <<"json">>, []}, no_call}], Req, State}
   end.
 
 content_types_accepted(Req, State) ->
+  logger:info("content_types_accepted Route: ~p", [get_route(Req)]),
   case get_route(Req) of
-    {<<"POST">>, <<"/todos">>} ->
+    {<<"POST">>, [<<"todos">>]} ->
       {[{{<<"application">>, <<"json">>, []}, create_todo}], Req, State};
-    {<<"PUT">>, <<"/todos/", _/binary>>} ->
+    {<<"POST">>, [<<"todos">>, <<_/binary>>, <<"complete">>]} ->
+      {[{{<<"application">>, <<"json">>, []}, complete_todo}], Req, State};
+    {<<"PUT">>, [<<"todos">>, <<_/binary>>]} ->
       {[{{<<"application">>, <<"json">>, []}, update_todo}], Req, State}
   end.
 
@@ -81,6 +88,17 @@ update_todo(Req, State) ->
     end,
   {stop, Req2, State}.
 
+complete_todo(Req, State) ->
+  TodoId = cowboy_req:binding(todo_id, Req),
+  Req1 =
+    case todo_db:update(TodoId, fun(Todo) -> Todo#todo{completed = true} end) of
+      {ok, Todo} ->
+        reply(200, todo_to_map(Todo), Req);
+      {error, not_found} ->
+        reply(404, #{message => <<"Not found">>}, Req)
+    end,
+  {stop, Req1, State}.
+
 delete_resource(Req, State) ->
   TodoId = cowboy_req:binding(todo_id, Req),
   case todo_db:delete(TodoId) of
@@ -97,8 +115,8 @@ todo_from_map(Map) ->
 
 todo_to_map(Todo = #todo{}) ->
   #todo{id = TodoID,
-                  title = Title,
-                  completed = Completed} =
+        title = Title,
+        completed = Completed} =
     Todo,
   #{<<"id">> => TodoID,
     <<"title">> => Title,

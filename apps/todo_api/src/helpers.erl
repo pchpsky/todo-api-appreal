@@ -15,7 +15,8 @@ reply(Status, Body = #{}, Req) ->
   cowboy_req:reply(Status, #{<<"content-type">> => <<"application/json">>}, jsx:encode(Body), Req).
 
 get_route(Req) ->
-  {cowboy_req:method(Req), cowboy_req:path(Req)}.
+  Path = binary:split(cowboy_req:path(Req), <<"/">>, [global, trim_all]),
+  {cowboy_req:method(Req), Path}.
 
 const(Val) ->
   fun (_) -> Val end.
