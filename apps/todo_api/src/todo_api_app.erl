@@ -10,6 +10,9 @@ start(_StartType, _StartArgs) ->
     {"/todos/:todo_id/complete", [{todo_id, int}], todos_handler, []},
     {"/todos/:todo_id", [{todo_id, int}], todos_handler, []},
     {"/todos", todos_handler, []},
+    {"/swagger.yaml", cowboy_static, {priv_file, todo_api, "swagger.yaml"}},
+    {"/swagger-ui", cowboy_static, {priv_file, todo_api, "swagger-ui/index.html"}},
+    {"/swagger-ui/[...]", cowboy_static, {priv_dir, todo_api, "swagger-ui"}},
     {"/[...]", no_match_handler, []}
   ],
   Dispatch = cowboy_router:compile([{'_', Routes}]),
